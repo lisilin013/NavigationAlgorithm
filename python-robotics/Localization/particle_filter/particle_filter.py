@@ -10,13 +10,14 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
+
 # Estimation parameter of PF
-Q = np.diag([0.1])**2  # range error
-R = np.diag([1.0, np.deg2rad(40.0)])**2  # input error
+Q = np.diag([0.1]) ** 2  # range error
+R = np.diag([1.0, np.deg2rad(40.0)]) ** 2  # input error
 
 #  Simulation parameter
-Qsim = np.diag([0.2])**2
-Rsim = np.diag([1.0, np.deg2rad(30.0)])**2
+Qsim = np.diag([0.2]) ** 2
+Rsim = np.diag([1.0, np.deg2rad(30.0)]) ** 2
 
 DT = 0.1  # time tick [s]
 SIM_TIME = 50.0  # simulation time [s]
@@ -28,6 +29,10 @@ NTh = NP / 2.0  # Number of particle for re-sampling
 
 show_animation = True
 
+'''
+得到一个系统输入值u
+'''
+
 
 def calc_input():
     v = 1.0  # [m/s]
@@ -36,8 +41,20 @@ def calc_input():
     return u
 
 
-def observation(xTrue, xd, u, RFID):
+'''
+观测方程
+'''
 
+
+def observation(xTrue, xd, u, RFID):
+    '''
+    :param xTrue: 状态真值
+    :param xd: 航迹推算值
+    :param u: 输入值
+    :param RFID: landmark坐标
+    :return: 状态真值，测量值，状态航迹推算值，输入u
+    z(distance, rfid_x, rfid_y)
+    '''
     xTrue = motion_model(xTrue, u)
 
     # add noise to gps x-y
@@ -47,11 +64,11 @@ def observation(xTrue, xd, u, RFID):
 
         dx = xTrue[0, 0] - RFID[i, 0]
         dy = xTrue[1, 0] - RFID[i, 1]
-        d = math.sqrt(dx**2 + dy**2)
+        d = math.sqrt(dx ** 2 + dy ** 2)
         if d <= MAX_RANGE:
             dn = d + np.random.randn() * Qsim[0, 0]  # add noise
             zi = np.array([[dn, RFID[i, 0], RFID[i, 1]]])
-            z = np.vstack((z, zi))
+            z = np.vstack((z, zi))  # rfid_dim*3
 
     # add noise to input
     ud1 = u[0, 0] + np.random.randn() * Rsim[0, 0]
@@ -64,7 +81,12 @@ def observation(xTrue, xd, u, RFID):
 
 
 def motion_model(x, u):
-
+    '''
+    根据input和当前状态推测下一时刻状态，其实是状态方程
+    :param x: x,y,(2d pose) phi(orientation), v(velocity)
+    :param u: v_t, w_t
+    :return:
+    '''
     F = np.array([[1.0, 0, 0, 0],
                   [0, 1.0, 0, 0],
                   [0, 0, 1.0, 0],
@@ -80,6 +102,11 @@ def motion_model(x, u):
     return x
 
 
+'''
+高斯函数，根据方差sigma得到在x=(\mu-mean)的概率
+'''
+
+
 def gauss_likelihood(x, sigma):
     p = 1.0 / math.sqrt(2.0 * math.pi * sigma ** 2) * \
         math.exp(-x ** 2 / (2 * sigma ** 2))
@@ -90,43 +117,67 @@ def gauss_likelihood(x, sigma):
 def calc_covariance(xEst, px, pw):
     cov = np.zeros((3, 3))
 
+    # 遍历所有粒子
     for i in range(px.shape[1]):
+        # 计算粒子状态和估计状态的前三维(x,y,phi)的error
         dx = (px[:, i] - xEst)[0:3]
+        # weight*error^2作为var
         cov += pw[0, i] * dx.dot(dx.T)
 
     return cov
 
 
 def pf_localization(px, pw, xEst, PEst, z, u):
-    """
+    '''
     Localization with Particle filter
-    """
+    :param px: particles
+    :param pw: particles' weights
+    :param xEst: 状态估计值
+    :param PEst: 状态估计协方差矩阵
+    :param z: 测量值
+    :param u: input
+    :return: xEst, PEst, px, pw
+    '''
 
     for ip in range(NP):
         x = np.array([px[:, ip]]).T
         w = pw[0, ip]
-        #  Predict with random input sampling
+        # ------------------------------------------
+        # 【第1步 粒子采样 P(x_k|x_k-1)】
+        # 这里其实是SIR filter，因为采样并没有用到测量值z
+        # ------------------------------------------
         ud1 = u[0, 0] + np.random.randn() * Rsim[0, 0]
         ud2 = u[1, 0] + np.random.randn() * Rsim[1, 1]
         ud = np.array([[ud1, ud2]]).T
         x = motion_model(x, ud)
 
-        #  Calc Importance Weight
-        for i in range(len(z[:, 0])):
+        # ------------------------------------------
+        # 【第2步 计算粒子的权值更新 】
+        # ------------------------------------------
+        for i in range(len(z[:, 0])):  # z(rfid_dim*3)
             dx = x[0, 0] - z[i, 1]
             dy = x[1, 0] - z[i, 2]
-            prez = math.sqrt(dx**2 + dy**2)
-            dz = prez - z[i, 0]
-            w = w * gauss_likelihood(dz, math.sqrt(Q[0, 0]))
+            prez = math.sqrt(dx ** 2 + dy ** 2)  # 机器人位置距离rfid的距离
+            dz = prez - z[i, 0]  # 距离error
+            w = w * gauss_likelihood(dz, math.sqrt(Q[0, 0]))  # 将所有的rfid测量值逐个迭代完成得到该粒子的权重
 
-        px[:, ip] = x[:, 0]
-        pw[0, ip] = w
+        px[:, ip] = x[:, 0]  # 更新粒子状态
+        pw[0, ip] = w  # 更新例子权值
 
-    pw = pw / pw.sum()  # normalize
+    # ------------------------------------------
+    # 【第3步 权值归一化 】
+    # ------------------------------------------
+    pw = pw / pw.sum()
 
-    xEst = px.dot(pw.T)
-    PEst = calc_covariance(xEst, px, pw)
+    # ------------------------------------------
+    # 【第4步 粒子滤波状态估计】
+    # ------------------------------------------
+    xEst = px.dot(pw.T)  # 估计粒子状态
+    PEst = calc_covariance(xEst, px, pw)  # 估计粒子的协方差矩阵，只计算了状态的前三维(x,y,phi)的cov
 
+    # ------------------------------------------
+    # 【第5步 重采样】
+    # ------------------------------------------
     px, pw = resampling(px, pw)
 
     return xEst, PEst, px, pw
@@ -138,11 +189,13 @@ def resampling(px, pw):
     """
 
     Neff = 1.0 / (pw.dot(pw.T))[0, 0]  # Effective particle number
+    # 有效粒子数目少的时候进行重采样
     if Neff < NTh:
-        wcum = np.cumsum(pw)
-        base = np.cumsum(pw * 0.0 + 1 / NP) - 1 / NP
-        resampleid = base + np.random.rand(base.shape[0]) / NP
+        wcum = np.cumsum(pw)  # 维度 NP*1 轮盘采样
+        base = np.cumsum(pw * 0.0 + 1 / NP) - 1 / NP  # 维度 NP*1, 假如NP=100，则base是一个按照0.01递增的[0,0.99]序列
+        resampleid = base + np.random.rand(base.shape[0]) / NP  # 维度 NP*1，均匀分布采样
 
+        # 得到重采样ids
         inds = []
         ind = 0
         for ip in range(NP):
@@ -151,7 +204,7 @@ def resampling(px, pw):
             inds.append(ind)
 
         px = px[:, inds]
-        pw = np.zeros((1, NP)) + 1.0 / NP  # init weight
+        pw = np.zeros((1, NP)) + 1.0 / NP  # 权重重新初始化
 
     return px, pw
 
@@ -204,19 +257,22 @@ def main():
                      [-5.0, 20.0]])
 
     # State Vector [x y yaw v]'
-    xEst = np.zeros((4, 1))
-    xTrue = np.zeros((4, 1))
-    PEst = np.eye(4)
+    xEst = np.zeros((4, 1))  # estimate state
+    xTrue = np.zeros((4, 1))  # ground true
+    xDR = np.zeros((4, 1))  # Dead reckoning
+    PEst = np.eye(4)  # 估计的协方差矩阵
 
     px = np.zeros((4, NP))  # Particle store
     pw = np.zeros((1, NP)) + 1.0 / NP  # Particle weight
-    xDR = np.zeros((4, 1))  # Dead reckoning
 
     # history
     hxEst = xEst
     hxTrue = xTrue
-    hxDR = xTrue
+    hxDR = xDR
 
+    # -------------------------------------------------
+    # 主循环
+    # -------------------------------------------------
     while SIM_TIME >= time:
         time += DT
         u = calc_input()

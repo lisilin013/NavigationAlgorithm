@@ -32,7 +32,6 @@ def calc_input():
 
 
 def observation(xTrue, xd, u):
-
     xTrue = motion_model(xTrue, u)
 
     # add noise to gps x-y
@@ -51,30 +50,22 @@ def observation(xTrue, xd, u):
 
 
 def motion_model(x, u):
+    F = np.array([[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0,
+                                                                   0]])
 
-    F = np.array([[1.0, 0, 0, 0],
-                  [0, 1.0, 0, 0],
-                  [0, 0, 1.0, 0],
-                  [0, 0, 0, 0]])
+    B = np.array([[DT * math.cos(x[2, 0]), 0], [DT * math.sin(x[2, 0]), 0],
+                  [0.0, DT], [1.0, 0.0]])
 
-    B = np.array([[DT * math.cos(x[2, 0]), 0],
-                  [DT * math.sin(x[2, 0]), 0],
-                  [0.0, DT],
-                  [1.0, 0.0]])
-
-    x = F@x + B@u
+    x = F @ x + B @ u
 
     return x
 
 
 def observation_model(x):
     #  Observation Model
-    H = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, 0]
-    ])
+    H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])
 
-    z = H@x
+    z = H @ x
 
     return z
 
@@ -96,40 +87,34 @@ def jacobF(x, u):
     """
     yaw = x[2, 0]
     v = u[0, 0]
-    jF = np.array([
-        [1.0, 0.0, -DT * v * math.sin(yaw), DT * math.cos(yaw)],
-        [0.0, 1.0, DT * v * math.cos(yaw), DT * math.sin(yaw)],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0]])
+    jF = np.array([[1.0, 0.0, -DT * v * math.sin(yaw), DT * math.cos(yaw)],
+                   [0.0, 1.0, DT * v * math.cos(yaw), DT * math.sin(yaw)],
+                   [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
 
     return jF
 
 
 def jacobH(x):
     # Jacobian of Observation Model
-    jH = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, 0]
-    ])
+    jH = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])
 
     return jH
 
 
 def ekf_estimation(xEst, PEst, z, u):
-
     #  Predict
     xPred = motion_model(xEst, u)
     jF = jacobF(xPred, u)
-    PPred = jF@PEst@jF.T + Q
+    PPred = jF @ PEst @ jF.T + Q
 
     #  Update
     jH = jacobH(xPred)
     zPred = observation_model(xPred)
     y = z - zPred
-    S = jH@PPred@jH.T + R
-    K = PPred@jH.T@np.linalg.inv(S)
-    xEst = xPred + K@y
-    PEst = (np.eye(len(xEst)) - K@jH)@PPred
+    S = jH @ PPred @ jH.T + R
+    K = PPred @ jH.T @ np.linalg.inv(S)
+    xEst = xPred + K @ y
+    PEst = (np.eye(len(xEst)) - K @ jH) @ PPred
 
     return xEst, PEst
 
@@ -153,7 +138,7 @@ def plot_covariance_ellipse(xEst, PEst):  # pragma: no cover
     angle = math.atan2(eigvec[bigind, 1], eigvec[bigind, 0])
     R = np.array([[math.cos(angle), math.sin(angle)],
                   [-math.sin(angle), math.cos(angle)]])
-    fx = R@(np.array([x, y]))
+    fx = R @ (np.array([x, y]))
     px = np.array(fx[0, :] + xEst[0, 0]).flatten()
     py = np.array(fx[1, :] + xEst[1, 0]).flatten()
     plt.plot(px, py, "--r")
@@ -194,12 +179,9 @@ def main():
         if show_animation:
             plt.cla()
             plt.plot(hz[0, :], hz[1, :], ".g")
-            plt.plot(hxTrue[0, :].flatten(),
-                     hxTrue[1, :].flatten(), "-b")
-            plt.plot(hxDR[0, :].flatten(),
-                     hxDR[1, :].flatten(), "-k")
-            plt.plot(hxEst[0, :].flatten(),
-                     hxEst[1, :].flatten(), "-r")
+            plt.plot(hxTrue[0, :].flatten(), hxTrue[1, :].flatten(), "-b")
+            plt.plot(hxDR[0, :].flatten(), hxDR[1, :].flatten(), "-k")
+            plt.plot(hxEst[0, :].flatten(), hxEst[1, :].flatten(), "-r")
             plot_covariance_ellipse(xEst, PEst)
             plt.axis("equal")
             plt.grid(True)
